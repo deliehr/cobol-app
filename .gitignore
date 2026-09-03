@@ -1,0 +1,6 @@
+# Compiled COBOL executables
+bin/
+Makefile
+
+# macOS
+.DS_Store
