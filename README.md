@@ -46,6 +46,12 @@ cobc -x -Wall -fformat=fixed -o bin/hello-world src/hello-world.cbl
 ./bin/hello-world
 ```
 
+Kurzform:
+
+```bash
+cobc -x -Wall -fformat=fixed -o bin/hello-world src/hello-world.cbl;./bin/hello-world;
+```
+
 Die Flags bedeuten:
 
 - `-x` — ein ausführbares Programm erzeugen (ohne `-x` entsteht ein Modul, das
