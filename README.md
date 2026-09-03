@@ -62,7 +62,8 @@ Die Flags bedeuten:
 │   └── hello-world.cbl
 ├── bin/                 kompilierte Binaries (nicht versioniert)
 ├── docs/
-│   └── konversation.md  Protokoll der Lern-Sessions (Code + Erklärungen)
+│   ├── konversation.md  Protokoll der Lern-Sessions (Code + Erklärungen)
+│   └── key-facts.md     eigene Notizen zu den Kernkonzepten
 ├── Makefile
 ├── CLAUDE.md            Projektkontext und Konventionen für Claude Code
 └── README.md

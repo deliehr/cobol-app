@@ -18,6 +18,11 @@ Java ist bekannt.
   Abschnitt `## Session N — YYYY-MM-DD — <Thema>` unten anfügen, mit dem Auftrag
   des Nutzers (wörtlich), was gemacht wurde, dem Code und der Erklärung. Das Log
   ist das Lernarchiv des Projekts und soll ohne den Chat-Verlauf lesbar sein.
+- **`docs/key-facts.md` gehört dem Nutzer.** Dort stehen ausschließlich seine
+  eigenen Notizen in seinen eigenen Worten. Nichts eigenmächtig ergänzen,
+  umformulieren, korrigieren oder sortieren — nur auf ausdrückliche Ansage
+  anfassen, und dann seinen Wortlaut übernehmen. Fachliche Korrekturen oder
+  Vertiefungen gehören in die Antwort im Chat, nicht in diese Datei.
 
 ## Git
 
@@ -54,6 +59,7 @@ cobc -x -Wall -fformat=fixed -o bin/hello-world src/hello-world.cbl
 src/     COBOL-Quellen (*.cbl), ein Programm pro Datei
 bin/     Kompilierte Binaries (gitignored)
 docs/    konversation.md — fortlaufendes Protokoll der Tutor-Sessions
+         key-facts.md   — Notizen des Nutzers (nur von ihm gepflegt)
 ```
 
 ## COBOL-Konventionen in diesem Projekt
