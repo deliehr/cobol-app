@@ -1,3 +1,5 @@
+      * Strings Concats
+
        IDENTIFICATION DIVISION.
        PROGRAM-ID. PROG0.
 

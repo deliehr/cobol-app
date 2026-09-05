@@ -14,3 +14,5 @@ Meine eigenen Notizen zu COBOL — in meinen Worten festgehalten.
 6. Fixed Format, Spaltenregel, Lochkarten -> Von Maschinen einlesbar.
 7. GnuCOBOL kann Free Format.
 8. Variablen werden aufgefüllt, siehe prog0
+9. Zahlen mit Vorzeichen: S (Signed), siehe prog1
+10. Wenn abgeschnitten wird, dann zuerst Einerstelle, Zehnerstelle, es gibt eine Ausrichtung. Strings X wird von links ausgerichtet, also X(5) -> X(2), ABCDE -> AB. Bei Zahlen zählt der Dezimalpunkt V. Ganzzahlen kann man sich mit virtuellen Dezimalpunkt vorstellen, also wird von rechts nach links abgeschnitten. 

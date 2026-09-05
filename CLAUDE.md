@@ -22,6 +22,21 @@ Java ist bekannt.
   Abschnitt `## Session N — YYYY-MM-DD — <Thema>` unten anfügen, mit dem Auftrag
   des Nutzers (wörtlich), was gemacht wurde, dem Code und der Erklärung. Das Log
   ist das Lernarchiv des Projekts und soll ohne den Chat-Verlauf lesbar sein.
+- **Hilfsprogramme gehören nach `src/helper/`, fortlaufend nummeriert.** Jedes
+  Programm, das Claude schreibt, um ein Konzept zu demonstrieren, kommt nach
+  `src/helper/` und heißt `NN-<thema>.cbl` (`01-pic-basics.cbl`,
+  `02-screen-demo.cbl`, …). Die Nummer gibt die didaktische Reihenfolge wieder,
+  nicht zwingend die zeitliche — beim Anlegen die nächste freie Nummer vergeben
+  und bestehende in Ruhe lassen; umsortiert wird nur auf Ansage des Nutzers.
+  Die `PROGRAM-ID` bleibt **ohne** Nummer (`PIC-BASICS`, nicht
+  `01-PIC-BASICS`) — die Nummer ordnet Dateien, sie gehört nicht zum
+  Programm. Das ist die einzige Ausnahme von der Regel "`PROGRAM-ID` gleich
+  dem Dateinamen".
+- **`src/` gehört dem Nutzer.** Dort liegen ausschließlich seine eigenen
+  Programme (`hello-world.cbl`, `prog0.cbl`), unnummeriert. Nie eine Datei
+  direkt in `src/` anlegen oder eine seiner Dateien dort verändern, ohne dass
+  er es ausdrücklich verlangt. `make run MAIN=<name>` findet Programme in
+  beiden Ordnern, die Binaries landen weiterhin flach in `bin/`.
 - **`docs/key-facts.md` gehört dem Nutzer.** Dort stehen ausschließlich seine
   eigenen Notizen in seinen eigenen Worten. Nichts eigenmächtig ergänzen,
   umformulieren, korrigieren oder sortieren — nur auf ausdrückliche Ansage
@@ -44,9 +59,9 @@ Java ist bekannt.
 ## Build & Run
 
 ```bash
-make                 # alle Programme in src/ nach bin/ kompilieren
+make                 # alle Programme aus src/ und src/helper/ bauen
 make run             # Standardprogramm (hello-world) bauen und starten
-make run MAIN=name   # anderes Programm aus src/<name>.cbl starten
+make run MAIN=name   # <name>.cbl aus src/ oder src/helper/ starten
 make clean           # bin/ löschen
 ```
 
@@ -60,10 +75,11 @@ cobc -x -Wall -fformat=fixed -o bin/hello-world src/hello-world.cbl
 ## Projektstruktur
 
 ```
-src/     COBOL-Quellen (*.cbl), ein Programm pro Datei
-bin/     Kompilierte Binaries (gitignored)
-docs/    konversation.md — fortlaufendes Protokoll der Tutor-Sessions
-         key-facts.md   — Notizen des Nutzers (nur von ihm gepflegt)
+src/         COBOL-Quellen des Nutzers (*.cbl), ein Programm pro Datei
+src/helper/  Demo-Programme von Claude, nummeriert (NN-<thema>.cbl)
+bin/         Kompilierte Binaries, flach aus beiden Quellordnern (gitignored)
+docs/        konversation.md — fortlaufendes Protokoll der Tutor-Sessions
+             key-facts.md   — Notizen des Nutzers (nur von ihm gepflegt)
 ```
 
 ## COBOL-Konventionen in diesem Projekt
@@ -76,11 +92,12 @@ docs/    konversation.md — fortlaufendes Protokoll der Tutor-Sessions
   - Spalten 12–72: Area B — alle Statements
   - **Nie über Spalte 72 hinaus schreiben**, sonst wird stillschweigend
     abgeschnitten. Prüfen mit:
-    `awk 'length($0)>72 {print FILENAME":"FNR}' src/*.cbl`
+    `awk 'length($0)>72 {print FILENAME":"FNR}' src/*.cbl src/helper/*.cbl`
 - Schlüsselwörter und Bezeichner in GROSSBUCHSTABEN, Wortteile mit `-` getrennt.
 - Präfixe für Datenfelder: `WS-` für WORKING-STORAGE, `LS-` für LOCAL-STORAGE,
   `LK-` für LINKAGE SECTION.
-- `PROGRAM-ID` gleich dem Dateinamen (in Großbuchstaben).
+- `PROGRAM-ID` gleich dem Dateinamen (in Großbuchstaben), bei nummerierten
+  Helfern ohne das `NN-`-Präfix.
 - Builds müssen **warnungsfrei** sein (`-Wall`). Obsolete Klauseln wie `AUTHOR.`
   daher nicht verwenden.
 

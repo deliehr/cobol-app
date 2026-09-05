@@ -207,7 +207,7 @@ Damit: Roadmap-Punkt 2 — Variablen und `PIC`-Klauseln, Ein-/Ausgabe über
 
 ### Was gemacht wurde
 
-`src/pic-basics.cbl` angelegt: liest Name und Kontostand vom Terminal und zeigt,
+`src/helper/01-pic-basics.cbl` angelegt: liest Name und Kontostand vom Terminal und zeigt,
 wie die Werte tatsächlich im Speicher liegen. Build warnungsfrei mit `-Wall`.
 
 ### Der Code
@@ -392,7 +392,7 @@ Der letzte Punkt ist als Arbeitsregel in `CLAUDE.md` übernommen.
 
 Ein Beispielprogramm als Beleg zu den Fragen:
 
-- `src/screen-demo.cbl` — `SCREEN SECTION`, eine Vollbild-Maske (GnuCOBOL
+- `src/helper/02-screen-demo.cbl` — `SCREEN SECTION`, eine Vollbild-Maske (GnuCOBOL
   bildet das auf ncurses ab). Muss in einem echten Terminal laufen.
 
 ### 1. Wozu gibt es COBOL, und von wem
@@ -454,7 +454,7 @@ Swing/JavaFX ist nicht Teil der Sprache.** Vier Ebenen:
 Attribut, und welches WORKING-STORAGE-Feld dahinterliegt. `DISPLAY` zeichnet die
 Maske, `ACCEPT` liest das ganze Formular auf einmal. Als Herstellererweiterung
 entstanden, mit COBOL 2002 in den Standard gewandert. GnuCOBOL setzt es auf
-ncurses um — siehe `src/screen-demo.cbl`.
+ncurses um — siehe `src/helper/02-screen-demo.cbl`.
 
 ```cobol
        SCREEN SECTION.
@@ -659,5 +659,353 @@ gleich sind, entsteht Datensalat, den kein Compiler bemängelt.
 ### Offener nächster Schritt
 
 Weiterhin Roadmap-Punkt 3: `COMPUTE`, `ADD`, `ROUNDED`, `ON SIZE ERROR`.
+
+---
+
+## Session 5 — 2026-09-05 — Rechnen mit dezimalen Feldern
+
+### Auftrag
+
+> Fahre mit Punkt 3 der Roadmap fort
+
+Roadmap-Punkt 3: *Rechnen mit dezimalen Feldern (`COMPUTE`, `ADD`)*.
+
+### Was gemacht wurde
+
+Neues Programm `src/helper/04-arithmetic.cbl`. Es zeigt vier Dinge an einem
+Rechnungsbeispiel: `COMPUTE` gegen die Verb-Formen, Abschneiden gegen
+`ROUNDED`, `ON SIZE ERROR` gegen stillen Überlauf, und `DIVIDE ... REMAINDER`.
+
+### Code
+
+```cobol
+      ******************************************************************
+      * ARITHMETIC                                                     *
+      *                                                                *
+      * Third step: decimal arithmetic. COMPUTE against the verb       *
+      * forms (ADD / SUBTRACT / MULTIPLY / DIVIDE), truncation versus  *
+      * ROUNDED, the ON SIZE ERROR guard, and DIVIDE ... REMAINDER.    *
+      ******************************************************************
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ARITHMETIC.
+
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+      * One invoice: net amount, tax rate, and the derived fields.
+       01  WS-INVOICE.
+           05  WS-NET             PIC 9(5)V99  VALUE 1234.56.
+           05  WS-VAT-RATE        PIC 9V9(4)   VALUE 0.1900.
+           05  WS-VAT             PIC 9(5)V99  VALUE ZERO.
+           05  WS-GROSS           PIC 9(5)V99  VALUE ZERO.
+      * Same computation, one decimal place -- truncated vs ROUNDED.
+       01  WS-TRUNCATED           PIC 9(5)V9   VALUE ZERO.
+       01  WS-ROUNDED             PIC 9(5)V9   VALUE ZERO.
+      * Deliberately too small to hold the result.
+       01  WS-SMALL               PIC 9(3)V99  VALUE ZERO.
+      * Splitting an amount into equal shares.
+       01  WS-TOTAL               PIC 9(7)V99  VALUE 1000.00.
+       01  WS-PARTS               PIC 9(3)     VALUE 3.
+       01  WS-SHARE               PIC 9(5)V99  VALUE ZERO.
+       01  WS-REST                PIC 9(5)V99  VALUE ZERO.
+      * Output formatting only -- never an operand of arithmetic.
+       01  WS-EDITED              PIC ZZZ,ZZ9.99.
+       01  WS-EDITED-1            PIC ZZZ,ZZ9.9.
+
+       PROCEDURE DIVISION.
+       MAIN-PARAGRAPH.
+           PERFORM SHOW-INVOICE
+           PERFORM SHOW-ROUNDING
+           PERFORM SHOW-SIZE-ERROR
+           PERFORM SHOW-SHARES
+           STOP RUN.
+
+      * COMPUTE takes an expression; the verb forms take operands.
+       SHOW-INVOICE.
+           COMPUTE WS-VAT ROUNDED = WS-NET * WS-VAT-RATE
+           ADD WS-NET TO WS-VAT GIVING WS-GROSS
+           ...
+
+      * A result too large for the target: guarded and unguarded.
+       SHOW-SIZE-ERROR.
+           COMPUTE WS-SMALL = WS-NET
+               ON SIZE ERROR
+                   DISPLAY 'guarded    result rejected, field unchanged'
+           END-COMPUTE
+           ...
+
+      * Classic money split: the remainder must not disappear.
+       SHOW-SHARES.
+           DIVIDE WS-TOTAL BY WS-PARTS GIVING WS-SHARE
+               REMAINDER WS-REST
+           ...
+```
+
+(Vollständige Quelle in `src/helper/04-arithmetic.cbl`; hier sind nur die
+DISPLAY-Blöcke gekürzt.)
+
+### Ausgabe
+
+```
+$ make run MAIN=04-arithmetic
+cobc -x -Wall -fformat=fixed -o bin/04-arithmetic src/helper/04-arithmetic.cbl
+./bin/04-arithmetic
+--- invoice ---
+net          1,234.56
+rate       0.1900
+vat            234.57   (rounded)
+gross        1,469.13
+
+--- 234.5664 into PIC 9(5)V9 ---
+default        234.5     (truncated)
+ROUNDED        234.6
+
+--- 1234.56 into PIC 9(3)V99 ---
+guarded    result rejected, field unchanged
+value now        0.00
+via MOVE       234.56   (silently cut)
+
+--- 1000.00 split 3 ways ---
+share          333.33
+remainder        0.01
+```
+
+### Erklärung
+
+#### `V` ist kein Zeichen
+
+`WS-VAT-RATE PIC 9V9(4)` hat eine Vor- und vier Nachkommastellen. Das `V`
+belegt keinen Speicher, es markiert nur die **gedachte** Kommaposition.
+Gespeichert stehen fünf Ziffern `01900`. Der Compiler kennt die Position und
+richtet bei jeder Rechnung danach aus — daher die dezimale Exaktheit.
+
+#### `COMPUTE` gegen die Verb-Formen
+
+```cobol
+COMPUTE WS-VAT ROUNDED = WS-NET * WS-VAT-RATE
+ADD WS-NET TO WS-VAT GIVING WS-GROSS
+```
+
+`COMPUTE` nimmt einen **Ausdruck** mit `+ - * / **` und Klammern — die Form,
+die einer Java-Zeile am nächsten kommt. Die Verb-Formen (`ADD`, `SUBTRACT`,
+`MULTIPLY`, `DIVIDE`) nehmen **Operanden**, keine Ausdrücke, und stammen aus
+der Zeit, in der COBOL sich wie Englisch lesen sollte.
+
+Die Falle sitzt in `TO` gegen `GIVING`:
+
+| Form                  | Bedeutung                                  |
+| --------------------- | ------------------------------------------ |
+| `ADD A TO B`          | `B = B + A` — **B wird überschrieben**     |
+| `ADD A TO B GIVING C` | `C = A + B` — B bleibt unberührt           |
+
+Ohne `GIVING` ist der letzte Operand zugleich das Ziel. Bei `SUBTRACT` dreht
+sich zusätzlich die Leserichtung: `SUBTRACT A FROM B` heißt `B = B - A`. Beim
+Lesen von Legacy-Code ist das eine der häufigsten Fehlinterpretationen.
+
+#### Abschneiden ist der Standard
+
+Das exakte Produkt ist `234.5664`, das Zielfeld hat eine Nachkommastelle.
+COBOL **schneidet ab**, sofern nicht `ROUNDED` dabeisteht — kein Rundungsfehler
+wie bei `double`, sondern eine exakt definierte Kappung, aber eine stille.
+
+Zwischenergebnisse sind davon nicht betroffen: in `COMPUTE X = A * B / C`
+rechnet der Compiler intern mit voller Genauigkeit und kappt erst beim
+Speichern ins Ziel.
+
+#### `ON SIZE ERROR` ist die einzige Bremse
+
+`1234.56` passt nicht in `PIC 9(3)V99`. Mit `ON SIZE ERROR` wird die Zuweisung
+**verworfen** — das Feld behält seinen alten Wert (`0.00`) und der Fehlerzweig
+läuft. Ohne Guard (oben über `MOVE` gezeigt) verschwinden die führenden
+Ziffern kommentarlos: aus 1234.56 wird 234.56. Faktor 1000 an Schaden, ohne
+Warnung, ohne Log.
+
+`ON SIZE ERROR` fängt auch Division durch Null — eine Exception dafür gibt es
+in COBOL nicht.
+
+#### `DIVIDE ... REMAINDER`
+
+1000,00 auf drei Teile: jeder 333,33, ein Cent bleibt liegen. COBOL liefert
+den Rest in einem eigenen Feld, statt ihn zu verlieren. Genau diese Sorte
+Genauigkeit ist der Grund, warum der Code in Banken nie abgelöst wurde.
+
+#### Gegenüberstellung mit Java
+
+| Aspekt                  | COBOL                                    | Java                                        |
+| ----------------------- | ---------------------------------------- | ------------------------------------------- |
+| Zahlentyp               | dezimal, feste Skala aus `PIC`           | `BigDecimal` mit `scale` — **nie** `double` |
+| Rechnen                 | `COMPUTE X = A * B`                      | `x = a.multiply(b)` — kein Operator-Overloading |
+| Skala des Ergebnisses   | an der **Deklaration des Ziels**         | am **Aufrufort**: `.setScale(2, …)`         |
+| Standardverhalten       | abschneiden, stillschweigend             | `ArithmeticException`, wenn `scale` nicht passt |
+| Runden                  | `ROUNDED` (half-up)                      | `RoundingMode.HALF_UP` explizit             |
+| Überlauf                | still gekappt, außer mit `ON SIZE ERROR` | `BigDecimal` wächst; Overflow gibt es nicht |
+| Division durch Null     | `ON SIZE ERROR`                          | `ArithmeticException`                       |
+| Rest                    | `DIVIDE … REMAINDER R`                   | `a.divideAndRemainder(b)` → `BigDecimal[2]` |
+| `ADD A TO B`            | mutiert `B`                              | kein Gegenstück — `BigDecimal` ist immutable |
+
+Der letzte Punkt tut bei einer Migration weh. `BigDecimal` ist
+**unveränderlich**: jede Operation liefert ein neues Objekt. COBOL-Felder sind
+**Speicherplätze fester Breite**, die überschrieben werden. Ein Paragraph mit
+`ADD WS-AMOUNT TO WS-TOTAL` in einer Schleife wird in Java zu
+`total = total.add(amount)` — die Zuweisung muss man hinschreiben, sonst
+passiert nichts.
+
+Und die Skala: in COBOL steht sie einmal in der WORKING-STORAGE SECTION und
+gilt für jede Zuweisung an dieses Feld. In Java muss man sie an **jeder**
+Rechenstelle wiederholen. Wer das vergisst, bekommt entweder eine
+`ArithmeticException` oder eine Genauigkeit, die von der Eingabe abhängt statt
+vom Feld. Der übliche Ausweg bei Migrationen ist eine kleine Wrapper-Klasse pro
+Feldtyp, die `scale` und `RoundingMode` kapselt — sie ersetzt genau das, was
+`PIC 9(5)V99` von sich aus mitbringt.
+
+### Offener nächster Schritt
+
+Roadmap-Punkt 4: Kontrollfluss — `IF`, `EVALUATE`, `PERFORM ... UNTIL`.
+
+---
+
+## Session 6 — 2026-09-05 — Vorzeichenbehaftete Zahlen: `S9` und `S9V9`
+
+### Auftrag des Nutzers
+
+> Gebe mir zwei Datentypen für Ganze Zahlen (auch negative) und Dezimalzahlen
+> (auch negative) aus
+
+### Die zwei Typen
+
+```cobol
+       01  WS-INT            PIC S9(5)        VALUE -12345.
+       01  WS-DEC            PIC S9(5)V9(2)   VALUE -12345.67.
+```
+
+- `S9(5)` — ganze Zahl, 5 Stellen: −99999 … +99999
+- `S9(5)V9(2)` — Dezimalzahl, 5 vor / 2 nach dem Komma
+
+`S` steht für *signed*. Ohne `S` ist das Feld vorzeichenlos, und ein negativer
+Wert kommt beim `MOVE` als Betrag an — stillschweigend.
+
+### Erklärung
+
+**Das `S` kostet kein Byte.** `S9(5)` belegt genauso 5 Bytes wie `9(5)`. Das
+Vorzeichen wird in die letzte Ziffer hineingerechnet — *overpunch*, Erbe der
+Lochkarte. Liest man dieselben Bytes über `REDEFINES ... PIC X(5)`, steht dort
+`1234u`: Ziffer und Minus sind ein einziges Zeichen geworden. Deshalb darf man
+COBOL-Dateien in Java nicht mit `new String(bytes, US_ASCII)` einlesen.
+
+`SIGN LEADING SEPARATE` schaltet das ab — ein Byte mehr, dafür ein echtes `-`
+vorne im Puffer. So sieht man es in Schnittstellendateien.
+
+**Ausgabe braucht ein *edited field*.**
+
+```cobol
+       01  WS-DEC-PRETTY     PIC ---,--9.99.
+```
+
+Das `-` schwimmt bis vor die erste signifikante Ziffer; `-12345.67` wird zu
+`-12,345.67`. Ein edited field ist kein Rechentyp — `COMPUTE` darauf ist
+verboten. Man rechnet in `S9(5)V9(2)` und `MOVE`-t erst am Schluss.
+
+### Gegenüberstellung mit Java
+
+| Aspekt              | COBOL                  | Java                          |
+| ------------------- | ---------------------- | ----------------------------- |
+| Ganzzahl signed     | `PIC S9(5)`            | `int` / `long`                |
+| Dezimal signed      | `PIC S9(5)V9(2)`       | `BigDecimal`, `scale = 2`     |
+| Vorzeichenlos       | `PIC 9(5)`             | **kein Gegenstück**           |
+| Zeichen-Speicherung | overpunch letzte Ziffer| Zweierkomplement              |
+| Wertebereich        | über **Stellenzahl**   | über **Bitbreite**            |
+| Ausgabeformat       | eigener Feldtyp        | `DecimalFormat` am Aufrufort  |
+| Vorzeichenverlust   | still bei `MOVE`       | Compilerfehler                |
+
+Zwei Punkte für die Migration:
+
+**Java hat kein `PIC 9(5)`.** `int` ist immer signed. Ein Feld ohne `S` sagt
+fachlich „hier kann nichts negativ werden" — diese Zusicherung steht im COBOL
+in der Datendeklaration und geht bei der Konvertierung verloren. Sie muss als
+Validierung nachgebaut werden.
+
+**Das Format gehört in COBOL zum Feld, in Java zum Aufrufort.**
+`PIC ---,--9.99` ist ein deklarierter Typ, jedes `MOVE` formatiert automatisch.
+In Java wiederholt man `new DecimalFormat("#,##0.00")` an jeder Ausgabestelle —
+dasselbe Muster wie `scale` in Session 5, derselbe Ausweg: eine Wrapper-Klasse
+pro fachlichem Feldtyp.
+
+---
+
+## Session 7 — 2026-09-05 — Truncation: welche Ziffer überlebt?
+
+### Auftrag des Nutzers
+
+> Schaue dir das Programm prog1 an. Dort rechne ich unten
+> `COMPUTE VAR5 = VAR0 - VAR3`, also 5-99 = 94. Die Ausgabe ist 4. Die 9 wird
+> warum nicht ausgegeben? VAR5 hat eine Ziffer, ich hätte jetzt erwartet das
+> von der 94 die 9 ausgegeben wird und nicht die 4.
+
+### Ausgangslage
+
+`src/prog1.cbl`, unverändert:
+
+```cobol
+       01  VAR0                   PIC S9(5) VALUE 5.
+       01  VAR3                   PIC S9(2) VALUE 99.
+       01  VAR5                   PIC 9(1).
+           COMPUTE VAR5 = VAR0 - VAR3
+```
+
+Ausgabe: `4`. Die Rechnung ergibt −94, nicht 94.
+
+### Erklärung
+
+Es passieren **zwei** Dinge hintereinander: `VAR5` ist ohne `S` deklariert,
+also fällt das Minus weg (−94 → 94), und `VAR5` hat nur eine Stelle, also
+werden die **hohen** Ziffern abgeschnitten (94 → 4).
+
+**Die Regel:** Numerische Felder werden am **Dezimalpunkt** ausgerichtet, nicht
+am linken Rand. `PIC 9(1)` heißt nicht „die erste Ziffer", sondern genau die
+**Einerstelle**. −94 hat dort die 4; die Zehnerstelle existiert im Ziel nicht.
+
+Dasselbe Fenster kappt bei Bedarf beide Enden: `S9(3)V9(2)` mit `123.45` in ein
+`S9(1)V9(1)` gibt `3.4` — links 12 verloren, rechts die 5.
+
+**Der Kontrast:** `PIC X` richtet **links** aus. `X(5)` → `X(2)` behält `AB`.
+Text hat keinen Dezimalpunkt, also gilt dort die umgekehrte Regel — genau die,
+die man beim Zahlenfall erwartet hätte.
+
+**Warum kein Fehler kommt:** COBOL schneidet still ab. Das ist Voreinstellung,
+kein Versehen — in einer Batch-Verarbeitung mit Millionen Sätzen wollte man
+1960 keinen Abbruch wegen eines Überlaufs. Die Prüfung muss man anfordern:
+
+```cobol
+           COMPUTE VAR5 = VAR0 - VAR3
+               ON SIZE ERROR MOVE 'yes' TO WS-FLAG
+           END-COMPUTE
+```
+
+Dabei wird das Ziel **gar nicht** beschrieben: es behält seinen alten Wert.
+Dort steht also nicht der abgeschnittene Wert, sondern der vorherige.
+
+### Gegenüberstellung mit Java
+
+| Fall                      | COBOL                       | Java                              |
+| ------------------------- | --------------------------- | --------------------------------- |
+| Zahl passt nicht ins Ziel | still gekappt, hohe Ziffern | `(byte) 300` = 44, hohe Bits weg  |
+| Überlaufprüfung           | `ON SIZE ERROR` (optional)  | `Math.addExact()` wirft           |
+| Zu viele Nachkommastellen | still abgeschnitten         | `setScale(n)` → Exception         |
+| Text zu lang              | rechts gekappt, kein Fehler | `substring` nötig                 |
+| Vorzeichen an `9(n)`      | still verloren              | Compilerfehler / nicht möglich    |
+
+Der `(byte)`-Cast trifft es am besten: `(byte) 300` ergibt 44, weil die hohen
+**Bits** wegfallen. COBOL macht dasselbe mit den hohen **Ziffern**, nur dezimal
+— `94 mod 10 = 4`. Beides ist still, aber in Java steht wenigstens ein
+sichtbarer Cast im Ausdruck. In COBOL steht der „Cast" in der
+Datendeklaration, hunderte Zeilen weiter oben.
+
+Für die Migration: `COMPUTE VAR5 = A - B` naiv als `var5 = a.subtract(b)` zu
+übersetzen ändert das Verhalten. Jedes COBOL-Zielfeld einer Berechnung ist
+implizit ein Modulo plus Vorzeichenbehandlung.
+
+### Offener nächster Schritt
+
+Unverändert Roadmap-Punkt 4: Kontrollfluss — `IF`, `EVALUATE`,
+`PERFORM ... UNTIL`.
 
 ---

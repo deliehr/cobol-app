@@ -3,7 +3,7 @@
 Ein Lernprojekt: COBOL von Grund auf, in kleinen Schritten — mit dem Ziel, die
 fertige Anwendung anschließend nach Java zu konvertieren.
 
-Aktueller Stand: **Variablen, `PIC`-Klauseln und `ACCEPT`.**
+Aktueller Stand: **Dezimale Arithmetik — `COMPUTE`, `ROUNDED`, `ON SIZE ERROR`.**
 
 ## Voraussetzungen
 
@@ -34,9 +34,9 @@ Weitere Targets:
 
 | Befehl                 | Wirkung                                        |
 | ---------------------- | ---------------------------------------------- |
-| `make`                 | alle Programme aus `src/` nach `bin/` bauen    |
+| `make`                 | alle Programme aus `src/` und `src/helper/` bauen |
 | `make run`             | `hello-world` bauen und ausführen              |
-| `make run MAIN=<name>` | `src/<name>.cbl` bauen und ausführen           |
+| `make run MAIN=<name>` | `<name>.cbl` aus beiden Ordnern bauen und starten |
 | `make clean`           | `bin/` entfernen                               |
 
 Ohne Make geht es genauso:
@@ -64,10 +64,14 @@ Die Flags bedeuten:
 
 ```
 .
-├── src/                 COBOL-Quellen, ein Programm pro Datei
+├── src/                 eigene COBOL-Quellen, ein Programm pro Datei
 │   ├── hello-world.cbl
-│   ├── pic-basics.cbl
-│   ├── screen-demo.cbl   SCREEN SECTION (braucht ein echtes Terminal)
+│   ├── prog0.cbl
+│   └── helper/          Demo-Programme aus den Tutor-Sessions, in Lernreihenfolge
+│       ├── 01-pic-basics.cbl
+│       ├── 02-screen-demo.cbl   SCREEN SECTION (braucht ein echtes Terminal)
+│       ├── 03-pic-scale.cbl
+│       └── 04-arithmetic.cbl
 ├── bin/                 kompilierte Binaries (nicht versioniert)
 ├── docs/
 │   ├── konversation.md  Protokoll der Lern-Sessions (Code + Erklärungen)
@@ -101,14 +105,14 @@ Wichtigste Fallgrube: **alles ab Spalte 73 verschwindet stillschweigend.**
 Prüfen lässt sich das so:
 
 ```bash
-awk 'length($0)>72 {print FILENAME":"FNR}' src/*.cbl
+awk 'length($0)>72 {print FILENAME":"FNR}' src/*.cbl src/helper/*.cbl
 ```
 
 ## Roadmap
 
 - [x] Hello World — Grundstruktur der vier DIVISIONs
 - [x] Variablen und `PIC`-Klauseln, Ein-/Ausgabe über `ACCEPT`
-- [ ] Rechnen mit dezimalen Feldern (`COMPUTE`, `ADD`)
+- [x] Rechnen mit dezimalen Feldern (`COMPUTE`, `ADD`)
 - [ ] Kontrollfluss: `IF`, `EVALUATE`, `PERFORM ... UNTIL`
 - [ ] Datenstrukturen: Gruppenfelder und Tabellen (`OCCURS`)
 - [ ] Dateiverarbeitung: sequenzielle Datei lesen und verarbeiten
