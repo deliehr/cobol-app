@@ -1009,3 +1009,354 @@ Unverändert Roadmap-Punkt 4: Kontrollfluss — `IF`, `EVALUATE`,
 `PERFORM ... UNTIL`.
 
 ---
+
+## Session 8 — 2026-09-05 — Dateizugriff: CSV, Indexdateien, Embedded SQL
+
+### Auftrag des Nutzers
+
+> Wie funktioniert das mit der Datenbankanbindung in Cobol, angenommen ich
+> möchte eine kleine Warehouse Verwaltung schreiben, wie würde man das machen?
+> Kann man Datensätze in CSVs verwalten?
+
+Nachgereicht:
+
+> Bitte das auch in die Konversation mit aufnehmen. Wenn ich 06 indexed file
+> mehrmals hintereinander ausführe, werden mir immer die gleichen Zahlen
+> ausgegeben
+
+### Was gemacht wurde
+
+Zwei neue Helfer:
+
+- `src/helper/05-csv-file.cbl` — flache Textdatei (`LINE SEQUENTIAL`),
+  Zeile bauen mit `STRING`, zerlegen mit `UNSTRING`.
+- `src/helper/06-indexed-file.cbl` — Indexdatei (`INDEXED`, ISAM) mit
+  `RECORD KEY`, `READ ... KEY IS`, `REWRITE`, `START` / `READ NEXT`.
+
+Neu ist der Ordner `data/`, in dem beide Programme ihre Dateien ablegen
+(`items.csv`, `items.dat`). Beides ist Programm-Output, gehört also in
+`.gitignore`. `items.dat` ist ein BDB-Binärformat, kein Text.
+
+### Die drei Wege, wie COBOL an Daten kommt
+
+| Weg              | COBOL                       | Realität                | Java                     |
+| ---------------- | --------------------------- | ----------------------- | ------------------------ |
+| Flache Textdatei | `ORGANIZATION LINE SEQUENTIAL` | Import/Export, Batch | `BufferedReader`         |
+| Indexdatei       | `ORGANIZATION INDEXED`      | der Bestandsspeicher    | kein Gegenstück in der JDK |
+| Echte DB         | `EXEC SQL ... END-EXEC`     | DB2, Oracle, PostgreSQL | JDBC, aber per Precompiler |
+
+Kurzantwort auf die Frage: CSV geht, ist für eine Warehouse-Verwaltung aber
+das falsche Werkzeug. CSV ist ein **Austauschformat**, der Bestand selbst
+gehört in eine Indexdatei.
+
+### 1. CSV — `05-csv-file.cbl`
+
+Erzeugte Datei:
+
+```
+A-100,Hex bolt M8,120,0.35
+A-101,Washer 8mm,4300,0.02
+B-200,Gear wheel,17,89.90
+```
+
+Ausgabe des Programms:
+
+```
+written: data/items.csv
+
+ID     NAME                   QTY      VALUE
+-------------------------------------------
+A-100  Hex bolt M8          120        42.00
+A-101  Washer 8mm           4300       86.00
+B-200  Gear wheel           17      1,528.30
+-------------------------------------------
+total stock value                1,656.30
+```
+
+**COBOL kennt kein CSV.** Keine Bibliothek, kein `split(",")`. Eine Zeile ist
+`PIC X(80)`, zusammengebaut und zerlegt wird von Hand.
+
+#### Die Datei anmelden
+
+```cobol
+           SELECT ITEM-FILE ASSIGN TO "data/items.csv"
+               ORGANIZATION IS LINE SEQUENTIAL
+               FILE STATUS  IS WS-STATUS.
+```
+
+`ITEM-FILE` ist der interne Name, der Pfad steht draußen. Das gehört in die
+ENVIRONMENT DIVISION, weil genau das der maschinenabhängige Teil ist. Auf dem
+Mainframe steht hier kein Pfad, sondern ein DD-Name, den der JCL-Job zur
+Laufzeit an einen echten Datensatz bindet — COBOLs Dependency Injection.
+
+#### Der Record-Buffer
+
+```cobol
+       FD  ITEM-FILE.
+       01  ITEM-RECORD            PIC X(80).
+```
+
+Der zentrale Unterschied zu Java: `ITEM-RECORD` ist *ein* Speicherbereich, den
+jeder `READ` überschreibt. Kein Objekt pro Zeile, keine Allokation, kein GC.
+
+> **Java:** `while ((line = br.readLine()) != null)` erzeugt pro Zeile ein
+> neues `String`-Objekt. COBOL liest in denselben Puffer — deshalb läuft ein
+> Batch mit 50 Mio. Sätzen in konstantem Speicher, und deshalb sind die Daten
+> des letzten Satzes weg, sobald der nächste gelesen wird.
+
+#### `FILE STATUS` statt Exceptions
+
+COBOL wirft nicht. Nach jedem I/O stehen zwei Ziffern im Statusfeld:
+
+| Code | Bedeutung                    |
+| ---- | ---------------------------- |
+| `00` | ok                           |
+| `10` | Dateiende (`AT END`)         |
+| `23` | Key nicht gefunden           |
+| `35` | Datei existiert nicht        |
+
+> **Java:** `IOException`. Der COBOL-Weg ist der C-Weg (`errno`): kein
+> Stacktrace, keine Propagierung. Wer den Status nicht prüft, rechnet mit Müll
+> weiter. Für die Migration wichtig: nach einem Fehler läuft COBOL *weiter* —
+> ein naives `try/catch` ändert das Verhalten.
+
+#### Zeile bauen — `STRING`
+
+```cobol
+           MOVE WS-QTY   TO WS-QTY-TEXT
+           MOVE WS-PRICE TO WS-PRICE-TEXT
+           STRING FUNCTION TRIM(WS-ID)         ","
+                  FUNCTION TRIM(WS-NAME)       ","
+                  FUNCTION TRIM(WS-QTY-TEXT)   ","
+                  FUNCTION TRIM(WS-PRICE-TEXT)
+               DELIMITED BY SIZE INTO ITEM-RECORD
+           END-STRING
+```
+
+Der Umweg über `WS-PRICE-TEXT PIC Z(4)9.99` ist nötig: `PIC 9(5)V99` mit Wert
+`0.35` steht im Speicher als `0000035`, denn `V` ist ein *gedachter*
+Dezimalpunkt, kein Byte. Direkt gestringt stünde `0000035` in der Datei. Das
+Edited-Field macht `    0.35` daraus, `TRIM` schneidet die Blanks weg.
+
+> **Java:** `String.join(",", ...)`. `DELIMITED BY SIZE` heißt „jeden Operanden
+> in voller Länge nehmen" — es ist *kein* Trennzeichen, die Kommas sind ganz
+> normale Operanden der Liste.
+
+#### Zeile zerlegen — `UNSTRING`
+
+```cobol
+           UNSTRING ITEM-RECORD DELIMITED BY ","
+               INTO WS-IN-ID WS-IN-NAME WS-IN-QTY WS-IN-PRICE
+           END-UNSTRING
+           COMPUTE WS-LINE-VALUE ROUNDED =
+               FUNCTION NUMVAL(WS-IN-QTY) * FUNCTION NUMVAL(WS-IN-PRICE)
+```
+
+`UNSTRING` ist `split(",")`, nur werden die Ziele einzeln hingeschrieben — es
+gibt kein Array variabler Länge, vier deklarierte Felder heißt maximal vier
+gelesene Felder. Die Zahlen kommen als **Text** zurück und müssen mit
+`FUNCTION NUMVAL` in Numerik übersetzt werden.
+
+> **Java:** `new BigDecimal(parts[3])`. `NUMVAL` entspricht genau `BigDecimal`,
+> nicht `Double.parseDouble` — der Wert ist dezimal-exakt.
+
+**Was CSV nicht kann:** einen Satz gezielt lesen (immer von vorne durch), einen
+Satz ändern (`REWRITE` scheitert bei `LINE SEQUENTIAL`, weil eine andere
+Zeilenlänge die Nachbarn überschreiben würde), gleichzeitige Zugriffe sichern.
+
+### 2. Indexdatei — `06-indexed-file.cbl`
+
+```cobol
+           SELECT ITEM-FILE ASSIGN TO "data/items.dat"
+               ORGANIZATION IS INDEXED
+               ACCESS MODE  IS DYNAMIC
+               RECORD KEY   IS IT-ID
+               FILE STATUS  IS WS-STATUS.
+
+       FD  ITEM-FILE.
+       01  ITEM-RECORD.
+           05  IT-ID              PIC X(6).
+           05  IT-NAME            PIC X(20).
+           05  IT-QTY             PIC 9(5).
+           05  IT-PRICE           PIC 9(5)V99.
+```
+
+Zwei Dinge sind anders als bei CSV. Erstens hat der Record **Struktur** —
+keine 80 anonymen Bytes, sondern vier benannte Felder fester Position. Kein
+`STRING`, kein `UNSTRING`, kein `NUMVAL` mehr im ganzen Programm. Zweitens
+macht `RECORD KEY IS IT-ID` das Feld zum Primärschlüssel; die Laufzeit hält
+dafür einen B-Tree.
+
+> **Java:** Dafür gibt es in der Standardbibliothek **kein Gegenstück**. Am
+> nächsten kommt eine persistente `TreeMap<String, Record>` — MapDB, Berkeley
+> DB JE, oder pragmatisch SQLite. Hier hat COBOL als *Sprachbestandteil*, was
+> Java als Framework nachrüsten muss.
+
+#### Gezielt lesen und ändern
+
+```cobol
+           MOVE "A-101" TO IT-ID
+           READ ITEM-FILE KEY IS IT-ID
+               INVALID KEY DISPLAY "not found"
+           END-READ
+
+           ADD 500 TO IT-QTY
+           REWRITE ITEM-RECORD
+```
+
+Key-Feld füllen, lesen, Puffer ändern, zurückschreiben.
+
+> **Java:** `map.get("A-101")` und `map.put(...)`, oder in SQL `SELECT ...
+> WHERE id = ?` plus `UPDATE`. `INVALID KEY` mit Status `23` ist das `null` aus
+> `map.get()`. `ACCESS MODE DYNAMIC` heißt nur: gezielter *und* sequenzieller
+> Zugriff im selben Programm.
+
+#### Sortiert durchlaufen
+
+```cobol
+           MOVE LOW-VALUES TO IT-ID
+           START ITEM-FILE KEY IS GREATER THAN IT-ID
+           PERFORM UNTIL WS-EOF = "Y"
+               READ ITEM-FILE NEXT RECORD
+                   AT END     MOVE "Y" TO WS-EOF
+                   NOT AT END PERFORM SHOW-ONE
+               END-READ
+           END-PERFORM
+```
+
+Geschrieben wurde in der Reihenfolge B-200, A-100, A-101 — zurück kommt es
+sortiert:
+
+```
+ID     NAME                   QTY      VALUE
+-------------------------------------------
+A-100  Hex bolt M8           120      42.00
+A-101  Washer 8mm           4800      96.00
+B-200  Gear wheel             17   1,528.30
+```
+
+`START` positioniert den Cursor, `READ NEXT` läuft von dort weiter.
+
+> **Java:** `map.tailMap(key).entrySet().iterator()`, oder ein JDBC-`ResultSet`
+> mit `ORDER BY`. `START` / `READ NEXT` ist ein Cursor, exakt im DB-Sinn.
+
+### 3. Echte Datenbank — Embedded SQL
+
+Im Bestandscode die häufigste Variante:
+
+```cobol
+       WORKING-STORAGE SECTION.
+           EXEC SQL BEGIN DECLARE SECTION END-EXEC.
+       01  HV-ID       PIC X(6).
+       01  HV-QTY      PIC S9(5) COMP-5.
+           EXEC SQL END DECLARE SECTION END-EXEC.
+           EXEC SQL INCLUDE SQLCA END-EXEC.
+
+       PROCEDURE DIVISION.
+           MOVE "A-101" TO HV-ID
+           EXEC SQL
+               SELECT QTY INTO :HV-QTY FROM ITEMS WHERE ID = :HV-ID
+           END-EXEC
+           IF SQLCODE NOT = 0 ...
+```
+
+`:HV-ID` sind **Host-Variablen**: normale COBOL-Felder, die im SQL auftauchen.
+Ein Precompiler (DB2, oder `ocesql` gegen PostgreSQL) übersetzt die
+`EXEC SQL`-Blöcke vor dem eigentlichen Compiler in `CALL`s.
+
+> **Java:** JDBC mit `PreparedStatement`; `:HV-ID` ist das `?`. Der
+> Unterschied: JDBC ist eine *Laufzeit*-API mit SQL als String, Embedded SQL
+> wird **zur Compile-Zeit** geprüft und ans echte Schema gebunden. Ein
+> Tippfehler im Spaltennamen fliegt beim Precompile auf, nicht im
+> Produktivbetrieb. Preis: ein zusätzlicher Buildschritt. Statt
+> `SQLException` gibt es wieder ein Statusfeld — `SQLCODE` in der `SQLCA`.
+
+### Nachtrag: warum mehrfache Läufe dieselben Zahlen liefern
+
+Beobachtung des Nutzers: `06-indexed-file` mehrmals gestartet, immer dasselbe
+Ergebnis. Die Daten *wurden* gespeichert — sie wurden beim nächsten Start nur
+sofort wieder gelöscht, von dieser Zeile:
+
+```cobol
+       LOAD-FILE.
+           OPEN OUTPUT ITEM-FILE
+```
+
+`OPEN OUTPUT` heißt nicht „zum Schreiben öffnen", sondern **„neu anlegen"**.
+Existiert die Datei, wird sie auf Länge null gesetzt. Jeder Lauf schrieb also
+die drei Sätze frisch, setzte A-101 auf 4300 und buchte 500 dazu — 4800,
+zwangsläufig immer.
+
+Die vier OPEN-Modi:
+
+| Modus    | Bedeutung                      | Datei muss existieren? | Java                              |
+| -------- | ------------------------------ | ---------------------- | --------------------------------- |
+| `INPUT`  | nur lesen                      | ja, sonst Status `35`  | `new FileInputStream(f)`          |
+| `OUTPUT` | **neu anlegen, Inhalt weg**    | nein, wird erzeugt     | `new FileOutputStream(f)`         |
+| `I-O`    | lesen *und* zurückschreiben    | ja, sonst Status `35`  | `RandomAccessFile(f, "rw")`       |
+| `EXTEND` | hinten anhängen                | nein                   | `new FileOutputStream(f, true)`   |
+
+> **Java:** Dieselbe Falle wie `new FileOutputStream(file)` gegenüber
+> `new FileOutputStream(file, true)`, bzw. `TRUNCATE_EXISTING` gegenüber
+> `APPEND`. Nur fehlt in Java wenigstens sichtbar ein Flag — in COBOL steht
+> das harmlose Wort `OUTPUT` da und sieht nach nichts aus.
+
+Der Fix: es gibt kein `OPEN OUTPUT IF NOT EXISTS`, also fragt man den Status.
+
+```cobol
+       ENSURE-FILE.
+           OPEN INPUT ITEM-FILE
+           IF WS-STATUS = "35"
+               PERFORM LOAD-FILE
+           ELSE
+               CLOSE ITEM-FILE
+               DISPLAY "data/items.dat exists -- keeping the stock"
+           END-IF.
+```
+
+Der fehlgeschlagene `OPEN` ist hier kein Ausnahmefall, sondern die normale
+Fallunterscheidung — genau dafür ist `FILE STATUS` da.
+
+> **Java:** `if (!Files.exists(p)) seed(p);` als eigenständige Abfrage. COBOL
+> hat das nicht: die Existenz erfährt man nur, indem man es versucht und den
+> Status liest.
+
+Drei Läufe hintereinander, jetzt kumulativ:
+
+```
+### Lauf 1 (Datei fehlt)
+loaded 3 records into data/items.dat
+lookup A-101 -> Washer 8mm, qty 04300
+booked in 500 -> qty now 04800
+
+### Lauf 2
+data/items.dat exists -- keeping the stock
+lookup A-101 -> Washer 8mm, qty 04800
+booked in 500 -> qty now 05300
+
+### Lauf 3
+data/items.dat exists -- keeping the stock
+lookup A-101 -> Washer 8mm, qty 05300
+booked in 500 -> qty now 05800
+```
+
+### Empfehlung für die Warehouse-Verwaltung
+
+`ORGANIZATION INDEXED`. Läuft ohne Zusatzsoftware (GnuCOBOL nutzt hier BDB,
+sichtbar über `cobc --info`), bietet Key-Zugriff, Update in place und sortierte
+Läufe — und entspricht dem, was in echtem Legacy-Code steht, wo statt BDB dann
+VSAM darunter liegt. CSV bleibt daneben nützlich: Lieferantenliste einlesen,
+Inventurbericht rausschreiben.
+
+Für die spätere Java-Migration ist die Indexdatei der angenehmere Fall: sie
+bildet sich sauber auf eine Tabelle mit Primary Key ab, jedes `05`-Feld wird
+ein Record-Feld, `PIC 9(5)V99` wird `BigDecimal`. Ein `UNSTRING`-Parser
+dagegen ist Logik, die Zeile für Zeile nachgebaut und getestet werden muss.
+
+### Offener nächster Schritt
+
+Weiterhin offen: Kontrollfluss — `IF`, `EVALUATE`, `PERFORM ... UNTIL`.
+Angeboten, aber noch nicht beauftragt: eine kleine echte Warehouse-Anwendung
+auf `INDEXED` mit Menü (Anlegen / Suchen / Einbuchen / Liste).
+
+---
