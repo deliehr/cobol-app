@@ -1360,3 +1360,137 @@ Angeboten, aber noch nicht beauftragt: eine kleine echte Warehouse-Anwendung
 auf `INDEXED` mit Menü (Anlegen / Suchen / Einbuchen / Liste).
 
 ---
+
+## Session 9 — 2026-09-05 — Wie COBOL und Java in der Praxis zusammenkommen
+
+### Auftrag des Nutzers
+
+> Ganz generell wenn es um Migrationen von Cobol Anwendungen nach Java geht:
+> Meine Vermutung ist, dass momentan Web APIs geschrieben werden, welche Cobol
+> Programme ausführen, den Output aus dem main std out einlesen, parsen und
+> wieder zurück geben, ist das richtig? Und die Migration geht jetzt vermutlich
+> dahin, dass Logik und Daten in Java Programme adaptiert werden, also komplett.
+
+### Was gemacht wurde
+
+Kein neuer Code — eine Einordnung der Vermutung. Kurzantwort: das beschriebene
+Muster existiert, ist aber der Randfall. Die reale Schnittstelle zwischen Java
+und COBOL ist fast nie Text auf `stdout`, sondern ein **Byte-Layout**.
+
+### 1. Warum `stdout` meist nicht die Schnittstelle ist
+
+Auf dem Mainframe ist ein COBOL-Programm kein Prozess, den man startet und
+dessen Ausgabe man abliest. Es ist eine **Transaktion** unter CICS oder IMS.
+Der Aufruf ist datenstrukturell:
+
+```cobol
+       LINKAGE SECTION.
+       01  DFHCOMMAREA.
+           05  LK-ACCOUNT-NO      PIC 9(10).
+           05  LK-AMOUNT          PIC S9(9)V99 COMP-3.
+           05  LK-RETURN-CODE     PIC 9(2).
+       PROCEDURE DIVISION.
+           MOVE 00 TO LK-RETURN-CODE
+```
+
+Der Java-Aufrufer schickt über das *CICS Transaction Gateway* einen Byte-Puffer
+mit exakt diesem Layout: 10 Ziffern EBCDIC, dann 6 Bytes gepacktes Dezimal,
+dann 2 Ziffern. Kein Parsing von Text, sondern ein Struct-Mapping.
+
+**Java-Gegenstück:** Man denkt sofort an ein DTO —
+
+```java
+record TransferRequest(String accountNo, BigDecimal amount) {}
+```
+
+— nur ohne jede Serialisierungsfreiheit. Feldreihenfolge und Byte-Breite sind
+Teil des Vertrags. Am nächsten kommt in der Java-Welt ein Protobuf-Schema oder
+ein `ByteBuffer` mit festem Layout.
+
+Die Schema-Datei dazu ist das **Copybook** (`.cpy`): eine COBOL-Datei, die nur
+die Datenstruktur enthält und per `COPY` in Aufrufer *und* Aufgerufenen
+eingebunden wird. Das ist die Währung jeder Mainframe-Integration — wer die
+Copybooks hat, kann anbinden.
+
+Übliche Integrationswege:
+
+| Weg                          | Was passiert                                                  |
+| ---------------------------- | ------------------------------------------------------------- |
+| **z/OS Connect EE**          | IBM-Produkt, generiert aus Copybooks REST/JSON-APIs            |
+| **CICS Transaction Gateway** | Java ruft CICS-Programm, COMMAREA rein, COMMAREA raus          |
+| **MQ**                       | Message-Payload in Copybook-Form, asynchron                    |
+| **DB2 Stored Procedures**    | COBOL als Prozedur, Aufruf über JDBC                           |
+| **3270-Screen-Scraping**     | Greenscreen-Maske wird ferngesteuert und „abgelesen"           |
+
+Der letzte Punkt kommt der Vermutung am nächsten und gilt als Notlösung: man
+nimmt ihn, wenn es kein aufrufbares Programm gibt, sondern nur eine
+Bildschirmmaske.
+
+**`stdout`-Parsing gibt es tatsächlich** — typischerweise aber erst *nach* einem
+Rehosting, wenn COBOL unter GnuCOBOL oder Micro Focus auf Linux läuft und
+plötzlich ein normales Executable ist (also genau unsere Projektsituation).
+Als Dauerlösung ist es schlecht, weil `DISPLAY` eine Präsentationsschicht ist
+und kein Vertrag: Sobald jemand ein Feld breiter macht, bricht der Parser.
+
+### 2. Die Migration hat fünf Stufen, nicht eine
+
+„Komplett nach Java adaptieren" ist eine Option von fünf — und die teuerste:
+
+1. **Rehost** — dieselben COBOL-Quellen, nur nicht mehr auf z/OS. Spart
+   Lizenzkosten, ändert fachlich nichts. Kein Java.
+2. **Replatform** — COBOL wird nach JVM-Bytecode kompiliert (Micro Focus COBOL
+   for JVM, Veryant isCOBOL). Läuft in der JVM, ist aber weiter COBOL-Quelltext.
+   Interop mit Java wird dadurch fast gratis.
+3. **Automatisches Transcoding** — COBOL-Quelle wird maschinell in Java-Quelle
+   übersetzt (AWS Blu Age, Heirloom, Astadia). Ergebnis: Java, das funktioniert,
+   aber wie COBOL aussieht. `PERFORM`-Absätze werden Methoden,
+   `WORKING-STORAGE` wird ein Feldblock, dazu eine dicke Runtime-Bibliothek, die
+   COBOL-Semantik nachbaut. Fachlich 1:1, aber ohne Domänenmodell — COBOL im
+   Java-Kostüm.
+4. **Rewrite** — Menschen schreiben Fachbereich für Fachbereich in idiomatischem
+   Java/Spring neu. Teuer, riskant, langfristig das Einzige, was wirklich
+   befreit.
+5. **Replace** — Standardsoftware kaufen (z. B. Kernbanksystem von der Stange)
+   und die Eigenentwicklung wegwerfen.
+
+In der Praxis läuft fast jedes große Programm über **Strangler Fig**: eine
+Fassade davorlegen, nach und nach einzelne Funktionen umhängen. Während dieser
+Jahre existiert genau der Wrapper aus der Vermutung — er ist das Gerüst, nicht
+das Gebäude.
+
+### 3. Der schwierigere Teil sind die Daten
+
+Logik zu übersetzen ist mühsam, aber überschaubar. Die Daten sind das Problem:
+
+- **VSAM** (indexsequenziell, wie unser `06-indexed-file.cbl`) und **IMS DB**
+  (hierarchisch) sind keine relationalen Datenbanken. Kein `SELECT`, kein Schema
+  im Katalog — die Struktur steht ausschließlich im Copybook.
+- **EBCDIC statt ASCII**, **COMP-3** (gepacktes Dezimal, zwei Ziffern pro Byte,
+  Vorzeichen im letzten Halbbyte), **Overpunch-Vorzeichen** bei
+  `PIC S9(n) DISPLAY` (siehe Session 6).
+- **`REDEFINES`** — dasselbe Speicherstück, zwei Deutungen, abhängig von einem
+  Typfeld nebenan. In Java wäre das Vererbung oder ein `sealed interface`; in
+  COBOL ist es eine Union ohne Diskriminator, und welche Deutung gilt, weiß nur
+  der Code.
+- **`OCCURS DEPENDING ON`** — variable Satzlänge. Die Datei ist nur lesbar, wenn
+  man die Logik kennt.
+
+Deshalb ist der aufwendigste Teil eines Migrationsprojekts meist nicht das
+Programmieren, sondern der **Parallelbetrieb**: Alt- und Neusystem laufen
+monatelang gleichzeitig auf denselben Eingaben, jede Abweichung im Cent wird
+untersucht. Genau dort schlägt `double` zu, wenn jemand die `BigDecimal`-Regel
+ignoriert hat (Session 5).
+
+### Fazit
+
+`stdout`-Parsing ja, aber am Rand. Die reale Schnittstelle ist das Copybook —
+ein Byte-Layout, kein Text. Und „komplett nach Java" ist das teuerste von fünf
+Zielen; viele Häuser landen bei „COBOL eingefroren, alles Neue in Java".
+
+### Offener nächster Schritt
+
+Unverändert offen: Kontrollfluss — `IF`, `EVALUATE`, `PERFORM ... UNTIL`.
+Angeboten, aber noch nicht beauftragt: eine kleine echte Warehouse-Anwendung
+auf `INDEXED` mit Menü (Anlegen / Suchen / Einbuchen / Liste).
+
+---
