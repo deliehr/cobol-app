@@ -13,3 +13,4 @@ Meine eigenen Notizen zu COBOL — in meinen Worten festgehalten.
 5. Es gibt tatsächlich Satzabschlüsse wie den Punkt.
 6. Fixed Format, Spaltenregel, Lochkarten -> Von Maschinen einlesbar.
 7. GnuCOBOL kann Free Format.
+8. Variablen werden aufgefüllt, siehe prog0

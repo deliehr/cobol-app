@@ -3,7 +3,7 @@
 Ein Lernprojekt: COBOL von Grund auf, in kleinen Schritten — mit dem Ziel, die
 fertige Anwendung anschließend nach Java zu konvertieren.
 
-Aktueller Stand: **Hello World läuft.**
+Aktueller Stand: **Variablen, `PIC`-Klauseln und `ACCEPT`.**
 
 ## Voraussetzungen
 
@@ -65,7 +65,9 @@ Die Flags bedeuten:
 ```
 .
 ├── src/                 COBOL-Quellen, ein Programm pro Datei
-│   └── hello-world.cbl
+│   ├── hello-world.cbl
+│   ├── pic-basics.cbl
+│   ├── screen-demo.cbl   SCREEN SECTION (braucht ein echtes Terminal)
 ├── bin/                 kompilierte Binaries (nicht versioniert)
 ├── docs/
 │   ├── konversation.md  Protokoll der Lern-Sessions (Code + Erklärungen)
@@ -105,7 +107,7 @@ awk 'length($0)>72 {print FILENAME":"FNR}' src/*.cbl
 ## Roadmap
 
 - [x] Hello World — Grundstruktur der vier DIVISIONs
-- [ ] Variablen und `PIC`-Klauseln, Ein-/Ausgabe über `ACCEPT`
+- [x] Variablen und `PIC`-Klauseln, Ein-/Ausgabe über `ACCEPT`
 - [ ] Rechnen mit dezimalen Feldern (`COMPUTE`, `ADD`)
 - [ ] Kontrollfluss: `IF`, `EVALUATE`, `PERFORM ... UNTIL`
 - [ ] Datenstrukturen: Gruppenfelder und Tabellen (`OCCURS`)

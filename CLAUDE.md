@@ -14,6 +14,10 @@ Java ist bekannt.
 - **Jeder Schritt muss lokal auf macOS lauffähig sein.** Nach jeder Änderung
   `make run` ausführen und das echte Programmausgabe zeigen.
 - Klein anfangen, ein Konzept pro Schritt.
+- **Java-Vergleiche permanent mitliefern.** Jedes COBOL-Konzept gegen sein
+  Java-Gegenstück stellen (wie im Abschnitt "COBOL ist in DIVISIONs gegliedert"
+  in `docs/konversation.md`) — auch dort, wo es *kein* Gegenstück gibt, denn
+  gerade das ist lehrreich. Java ist die bekannte Sprache, also der Ankerpunkt.
 - **Jede Session am Ende in `docs/konversation.md` protokollieren:** neuen
   Abschnitt `## Session N — YYYY-MM-DD — <Thema>` unten anfügen, mit dem Auftrag
   des Nutzers (wörtlich), was gemacht wurde, dem Code und der Erklärung. Das Log
